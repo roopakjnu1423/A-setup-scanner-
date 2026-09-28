@@ -26,7 +26,11 @@ st.caption("Based on 3-5 week tight base + volume breakout + first 20 EMA pullba
 
 # Sidebar Configuration
 st.sidebar.header("⚙️ Universe & Parameters")
-universe_choice = st.sidebar.selectbox("Universe", ["Nifty 500", "All NSE Equity", "BSE"], index=0)
+universe_choice = st.sidebar.selectbox(
+    "Universe",
+    ["All (NSE + BSE ~5000)", "All NSE Equities (~2600)", "Nifty 500", "BSE Only"],
+    index=0
+)
 status_filter = st.sidebar.multiselect("Filter Status", ["TOUCH", "BOUNCE", "WATCH"], default=["TOUCH", "BOUNCE", "WATCH"])
 
 st.sidebar.subheader("Detection Thresholds")
@@ -38,7 +42,7 @@ vol_dryup = st.sidebar.slider("Max Pullback Vol Dry-Up (%)", 40, 100, 70) / 100.
 max_risk = st.sidebar.slider("Max Allowed Risk (%)", 3, 12, 7) / 100.0
 min_rr = st.sidebar.slider("Min Risk:Reward", 1.5, 5.0, 2.0, 0.5)
 include_running = st.sidebar.checkbox("Include Running Week", value=False)
-max_symbols = st.sidebar.number_input("Max Symbols to Scan (0 for All)", min_value=0, max_value=2000, value=50, step=25)
+max_symbols = st.sidebar.number_input("Max Symbols to Scan (0 for Full 5000)", min_value=0, max_value=6000, value=250, step=50)
 
 config = ScreenerConfig(
     base_max_depth_pct=base_max_depth,
@@ -53,38 +57,44 @@ config = ScreenerConfig(
 
 # Scan Button
 if st.sidebar.button("🚀 Run Live Scan", type="primary") or "scan_results" not in st.session_state:
-    with st.spinner("Fetching data and running A+ detection..."):
-        universe = load_universe(preset=universe_choice)
-        if max_symbols > 0:
-            universe = universe[:max_symbols]
+    universe = load_universe(preset=universe_choice)
+    if max_symbols > 0:
+        universe = universe[:max_symbols]
 
-        tickers = [s["ticker"] for s in universe]
-        symbol_map = {s["ticker"]: s for s in universe}
+    tickers = [s["ticker"] for s in universe]
+    symbol_map = {s["ticker"]: s for s in universe}
 
-        provider = YFinanceDataProvider(config)
-        data_dict = provider.fetch_daily_ohlcv(tickers)
+    progress_bar = st.progress(0, text=f"Scanning {len(tickers)} stocks from {universe_choice}...")
+    
+    def on_progress(current, total, msg):
+        pct = int((current / max(1, total)) * 100)
+        progress_bar.progress(min(100, pct), text=f"[{current}/{total}] {msg}")
 
-        results = []
-        enriched_map = {}
+    provider = YFinanceDataProvider(config)
+    data_dict = provider.fetch_daily_ohlcv(tickers, progress_callback=on_progress)
 
-        for ticker, daily_df in data_dict.items():
-            sym_info = symbol_map.get(ticker, {"symbol": ticker, "exchange": "NSE"})
-            if not provider.passes_filters(daily_df):
-                continue
+    results = []
+    enriched_map = {}
 
-            weekly = resample_to_weekly(daily_df, include_running_week=config.include_running_week)
-            if len(weekly) < 25:
-                continue
+    for ticker, daily_df in data_dict.items():
+        sym_info = symbol_map.get(ticker, {"symbol": ticker, "exchange": "NSE"})
+        if not provider.passes_filters(daily_df):
+            continue
 
-            enriched = compute_indicators(weekly)
-            setup = detect_setup(enriched, symbol=sym_info["symbol"], exchange=sym_info["exchange"], config=config)
-            if setup:
-                results.append(setup)
-                enriched_map[setup.symbol] = (enriched, setup)
+        weekly = resample_to_weekly(daily_df, include_running_week=config.include_running_week)
+        if len(weekly) < 25:
+            continue
 
-        results.sort(key=lambda x: x.score, reverse=True)
-        st.session_state["scan_results"] = results
-        st.session_state["enriched_map"] = enriched_map
+        enriched = compute_indicators(weekly)
+        setup = detect_setup(enriched, symbol=sym_info["symbol"], exchange=sym_info["exchange"], config=config)
+        if setup:
+            results.append(setup)
+            enriched_map[setup.symbol] = (enriched, setup)
+
+    results.sort(key=lambda x: x.score, reverse=True)
+    st.session_state["scan_results"] = results
+    st.session_state["enriched_map"] = enriched_map
+    progress_bar.empty()
 
 results = st.session_state.get("scan_results", [])
 enriched_map = st.session_state.get("enriched_map", {})

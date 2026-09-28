@@ -48,6 +48,7 @@ fun FilterSettingsDialog(
     modifier: Modifier = Modifier
 ) {
     var universe by remember { mutableStateOf(initialParams.universe) }
+    var maxScanCount by remember { mutableIntStateOf(initialParams.maxScanCount) }
     var baseDepth by remember { mutableDoubleStateOf(initialParams.baseMaxDepthPct) }
     var breakoutGain by remember { mutableDoubleStateOf(initialParams.breakoutMinGainPct) }
     var volMult by remember { mutableDoubleStateOf(initialParams.breakoutVolMult) }
@@ -75,21 +76,36 @@ fun FilterSettingsDialog(
                     .padding(vertical = 4.dp)
             ) {
                 // Universe Selector
-                Text("Stock Universe", fontSize = 13.sp, color = Color(0xFF94A3B8))
+                Text("Stock Universe (~5000 Total Stocks)", fontSize = 13.sp, color = Color(0xFF94A3B8))
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf("Nifty 500", "All NSE EQ", "BSE").forEach { u ->
+                    listOf(
+                        "All ~5000" to "All (NSE + BSE ~5000)",
+                        "NSE ~2600" to "All NSE Equities (~2600)",
+                        "Nifty 500" to "Nifty 500",
+                        "BSE" to "BSE Only"
+                    ).forEach { (label, fullName) ->
                         FilterChip(
-                            selected = universe == u,
-                            onClick = { universe = u },
-                            label = { Text(u, fontSize = 12.sp) }
+                            selected = universe == fullName || universe == label,
+                            onClick = { universe = fullName },
+                            label = { Text(label, fontSize = 11.sp) }
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
+
+                // Max Stocks to Scan
+                SliderSetting(
+                    title = "Max Stocks to Scan (0 = All in Universe)",
+                    value = if (maxScanCount in listOf(0, 5000)) "All 5000" else "$maxScanCount stocks",
+                    current = if (maxScanCount == 0) 5000f else maxScanCount.toFloat(),
+                    valueRange = 50f..5000f,
+                    onValueChange = { maxScanCount = if (it >= 4900f) 5000 else it.roundToInt() }
+                )
 
                 // Max Base Depth
                 SliderSetting(
@@ -188,6 +204,7 @@ fun FilterSettingsDialog(
                     onApply(
                         initialParams.copy(
                             universe = universe,
+                            maxScanCount = maxScanCount,
                             baseMaxDepthPct = baseDepth,
                             breakoutMinGainPct = breakoutGain,
                             breakoutVolMult = volMult,

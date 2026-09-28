@@ -78,15 +78,16 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    repository: MarketRepository = remember { MarketRepository() },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val repository = remember(context) { MarketRepository(context) }
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var params by remember { mutableStateOf(ScreenerParameters()) }
     var isScanning by remember { mutableStateOf(false) }
+    var scanProgressText by remember { mutableStateOf("") }
     var setups by remember { mutableStateOf<List<SetupCandidate>>(emptyList()) }
     var selectedCandidate by remember { mutableStateOf<SetupCandidate?>(null) }
 
@@ -103,14 +104,18 @@ fun MainScreen(
     fun triggerScan(currentParams: ScreenerParameters) {
         coroutineScope.launch {
             isScanning = true
+            scanProgressText = "Initializing..."
             try {
-                val results = repository.runScan(currentParams)
+                val results = repository.runScan(currentParams) { cur, tot, sym ->
+                    scanProgressText = "$cur / $tot ($sym)"
+                }
                 setups = results
                 snackbarHostState.showSnackbar("Scan completed: found ${results.size} setups in ${currentParams.universe}")
             } catch (e: Exception) {
                 snackbarHostState.showSnackbar("Scan error: ${e.localizedMessage}")
             } finally {
                 isScanning = false
+                scanProgressText = ""
             }
         }
     }
@@ -161,7 +166,7 @@ fun MainScreen(
                                 color = Color.White
                             )
                             Text(
-                                text = "${params.universe} • Weekly 20 EMA",
+                                text = "${params.universe} (${repository.totalUniverseCount} Stocks) • Weekly 20 EMA",
                                 fontSize = 11.sp,
                                 color = Color(0xFF94A3B8)
                             )
@@ -219,7 +224,7 @@ fun MainScreen(
                         Icon(Icons.Default.Refresh, contentDescription = "Scan")
                     }
                 },
-                text = { Text(if (isScanning) "Scanning..." else "Scan Now") },
+                text = { Text(if (isScanning) scanProgressText.ifBlank { "Scanning..." } else "Scan Stocks") },
                 containerColor = SkyBlue,
                 contentColor = Color.White,
                 modifier = Modifier.testTag("scan_fab")

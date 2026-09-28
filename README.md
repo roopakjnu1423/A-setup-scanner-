@@ -28,8 +28,14 @@ streamlit run app.py
 
 ### 4. CLI Scanner with Replay & Telegram Alerts
 ```bash
-# Live scan of Nifty 500
-python scan.py --universe "Nifty 500"
+# Live scan of all ~5000 NSE + BSE stocks
+python scan.py --universe "All (NSE + BSE ~5000)"
+
+# Live scan of all ~2600 NSE Equities
+python scan.py --universe "All NSE Equities (~2600)"
+
+# Live scan of Nifty 500 (or custom limit)
+python scan.py --universe "Nifty 500" --max 100
 
 # Historical backtest / replay as of a specific date with 4, 8, and 12-week forward returns:
 python scan.py --as_of 2024-03-01
@@ -37,6 +43,14 @@ python scan.py --as_of 2024-03-01
 # Send instant Telegram alerts for top setups (configure .env first):
 python scan.py --notify
 ```
+
+---
+
+## 🏛️ Comprehensive Stock Universe (~5,000 Stocks)
+The app includes the complete official catalog of Indian equities:
+- **2,601 NSE Equities**: Directly parsed from official NSE archives (`EQUITY_L.csv`), including active `EQ`, `BE`, and `BZ` series.
+- **2,400+ BSE Scrips**: Active BSE listed securities and scrip master codes (500000+ series).
+- **Offline & Bundled Cache**: Stored in `data/nse_bse_5000.csv` and Android assets for instant access, offline fallback, and fast batch scanning.
 
 ---
 

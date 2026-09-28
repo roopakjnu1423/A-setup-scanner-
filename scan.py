@@ -61,8 +61,15 @@ def run_scanner(
     symbol_map = {s["ticker"]: s for s in universe}
 
     print(f"[*] Fetching market data for {len(tickers)} symbols...")
+    
+    def cli_progress(current, total, msg):
+        pct = (current / max(1, total)) * 100
+        sys.stdout.write(f"\r  [{current}/{total} - {pct:.1f}%] {msg}")
+        sys.stdout.flush()
+
     provider = YFinanceDataProvider(config)
-    data_dict = provider.fetch_daily_ohlcv(tickers)
+    data_dict = provider.fetch_daily_ohlcv(tickers, progress_callback=cli_progress)
+    print()
 
     print(f"[*] Processing weekly bars and scanning setups...")
     detected_setups: list[SetupResult] = []
@@ -173,7 +180,12 @@ def run_scanner(
 
 def main():
     parser = argparse.ArgumentParser(description="A+ Setup Stock Screener CLI")
-    parser.add_argument("--universe", type=str, default="Nifty 500", choices=["Nifty 500", "All NSE Equity", "BSE"], help="Universe to scan")
+    parser.add_argument(
+        "--universe",
+        type=str,
+        default="All (NSE + BSE ~5000)",
+        help="Universe to scan: 'All (NSE + BSE ~5000)', 'All NSE Equities (~2600)', 'Nifty 500', or 'BSE Only'"
+    )
     parser.add_argument("--as_of", type=str, default=None, help="Replay as of specific date (YYYY-MM-DD)")
     parser.add_argument("--notify", action="store_true", help="Send Telegram alert with top findings")
     parser.add_argument("--max", type=int, default=None, help="Limit number of tickers to scan")

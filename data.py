@@ -7,7 +7,7 @@ import datetime
 import os
 import sqlite3
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 import pandas as pd
 import yfinance as yf
 
@@ -17,14 +17,18 @@ class MarketDataProvider(ABC):
     """Abstract interface for stock market data retrieval."""
     
     @abstractmethod
-    def fetch_daily_ohlcv(self, tickers: List[str]) -> Dict[str, pd.DataFrame]:
+    def fetch_daily_ohlcv(
+        self,
+        tickers: List[str],
+        progress_callback: Optional[Callable[[int, int, str], None]] = None
+    ) -> Dict[str, pd.DataFrame]:
         """Fetch daily OHLCV dataframe for each ticker."""
         pass
 
 class YFinanceDataProvider(MarketDataProvider):
     """
     Yahoo Finance data fetcher with local SQLite caching,
-    exponential backoff, and batch downloading.
+    exponential backoff, and batch downloading for ~5000 stocks.
     """
     
     def __init__(self, config: ScreenerConfig = DEFAULT_CONFIG):
@@ -56,10 +60,10 @@ class YFinanceDataProvider(MarketDataProvider):
                     params=(ticker,),
                     parse_dates=["date"]
                 )
-                if not df.empty:
+                if not df.empty and len(df) >= 50:
                     df.set_index("date", inplace=True)
-                    # Check if latest date is within 2 days (recency check)
                     latest = df.index.max()
+                    # If cached within 2 days, treat as fresh
                     if (pd.Timestamp.now() - latest).days <= 2:
                         return df
         except Exception:
@@ -72,8 +76,15 @@ class YFinanceDataProvider(MarketDataProvider):
                 records = []
                 for idx, row in df.iterrows():
                     d_str = idx.strftime("%Y-%m-%d")
-                    records.append((ticker, d_str, float(row["Open"]), float(row["High"]),
-                                    float(row["Low"]), float(row["Close"]), float(row["Volume"])))
+                    records.append((
+                        ticker,
+                        d_str,
+                        float(row["Open"]),
+                        float(row["High"]),
+                        float(row["Low"]),
+                        float(row["Close"]),
+                        float(row["Volume"])
+                    ))
                 conn.executemany("""
                     INSERT OR REPLACE INTO daily_ohlcv (ticker, date, open, high, low, close, volume)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -81,26 +92,45 @@ class YFinanceDataProvider(MarketDataProvider):
         except Exception:
             pass
 
-    def fetch_daily_ohlcv(self, tickers: List[str]) -> Dict[str, pd.DataFrame]:
-        results = {}
-        missing = []
+    def fetch_daily_ohlcv(
+        self,
+        tickers: List[str],
+        progress_callback: Optional[Callable[[int, int, str], None]] = None
+    ) -> Dict[str, pd.DataFrame]:
+        results: Dict[str, pd.DataFrame] = {}
+        missing: List[str] = []
 
-        for ticker in tickers:
+        total_tickers = len(tickers)
+        for i, ticker in enumerate(tickers):
             cached = self._load_cached(ticker)
-            if cached is not None and len(cached) >= 100:
+            if cached is not None and len(cached) >= 50:
                 results[ticker] = cached
             else:
                 missing.append(ticker)
 
+        if progress_callback:
+            progress_callback(len(results), total_tickers, "Loaded cached datasets")
+
         if not missing:
             return results
 
-        # Process missing tickers in batches with backoff
-        for i in range(0, len(missing), self.config.batch_size):
-            batch = missing[i:i + self.config.batch_size]
+        # Process missing tickers in batches
+        processed_count = len(results)
+        batch_size = max(10, min(self.config.batch_size, 100))
+
+        for i in range(0, len(missing), batch_size):
+            batch = missing[i:i + batch_size]
             batch_str = " ".join(batch)
             attempts = 3
             data = None
+
+            if progress_callback:
+                progress_callback(
+                    processed_count,
+                    total_tickers,
+                    f"Fetching batch {i // batch_size + 1}/{(len(missing) + batch_size - 1) // batch_size}"
+                )
+
             for attempt in range(attempts):
                 try:
                     data = yf.download(
@@ -112,7 +142,7 @@ class YFinanceDataProvider(MarketDataProvider):
                         progress=False
                     )
                     break
-                except Exception as e:
+                except Exception:
                     time.sleep(1.0 * (2 ** attempt))
 
             if data is not None and not data.empty:
@@ -125,18 +155,27 @@ class YFinanceDataProvider(MarketDataProvider):
                 else:
                     for t in batch:
                         try:
-                            sub_df = pd.DataFrame({
-                                "Open": data["Open"][t],
-                                "High": data["High"][t],
-                                "Low": data["Low"][t],
-                                "Close": data["Close"][t],
-                                "Volume": data["Volume"][t]
-                            }).dropna()
+                            # Handle both MultiIndex and standard format from yf
+                            if isinstance(data.columns, pd.MultiIndex):
+                                sub_df = pd.DataFrame({
+                                    "Open": data["Open"][t],
+                                    "High": data["High"][t],
+                                    "Low": data["Low"][t],
+                                    "Close": data["Close"][t],
+                                    "Volume": data["Volume"][t]
+                                }).dropna()
+                            else:
+                                sub_df = data.dropna()
                             if not sub_df.empty:
                                 results[t] = sub_df
                                 self._save_cache(t, sub_df)
                         except Exception:
                             continue
+
+            processed_count += len(batch)
+
+        if progress_callback:
+            progress_callback(total_tickers, total_tickers, "Market data fetch complete")
 
         return results
 
@@ -145,20 +184,19 @@ class YFinanceDataProvider(MarketDataProvider):
         Check if stock passes baseline filters:
         - Price >= Rs 20
         - 50-day average daily traded value >= Rs 2 Cr (20,000,000)
-        - >= 52 weeks (~250 trading days) of history
+        - >= 52 weeks (~250 trading days) of history (minimum 100 bars for screening)
         """
-        if len(df) < 150: # need at least sufficient history
+        if len(df) < 100:
             return False
-            
+
         last_close = df["Close"].iloc[-1]
         if last_close < self.config.min_price:
             return False
 
-        # 50-day average traded value = Close * Volume
         recent_50 = df.iloc[-50:]
         daily_traded_value = recent_50["Close"] * recent_50["Volume"]
         avg_value = daily_traded_value.mean()
-        min_required_value = self.config.min_traded_value_cr * 10_000_000 # 2 Cr = 20M INR
+        min_required_value = self.config.min_traded_value_cr * 10_000_000
 
         if avg_value < min_required_value:
             return False

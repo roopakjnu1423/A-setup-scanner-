@@ -48,7 +48,8 @@ data class SetupCandidate(
 )
 
 data class ScreenerParameters(
-    val universe: String = "Nifty 500",
+    val universe: String = "All (NSE + BSE ~5000)",
+    val maxScanCount: Int = 250,
     val baseMaxDepthPct: Double = 10.0,
     val breakoutMinGainPct: Double = 4.0,
     val breakoutVolMult: Double = 2.0,
