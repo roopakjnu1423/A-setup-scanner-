@@ -1,0 +1,6 @@
+{
+  "name": "A+ Setup Screener",
+  "description": "NSE & BSE weekly stock screener for the tight base, volume breakout, and first 20 EMA pullback A+ setup with trade math, risk-reward, and charts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
